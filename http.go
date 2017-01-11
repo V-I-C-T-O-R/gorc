@@ -3,32 +3,32 @@ package gorc
 import (
 	"crypto/tls"
 	"github.com/coreos/go-log/log"
+	"github.com/hu17889/go_spider/core/common/request"
+	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"strconv"
 )
 
-const (
-	HCP_ORC    string = "https://kyfw.12306.cn/otn/passcodeNew/getPassCodeNew?module=other&rand=sjrand&0.21191171556711197"
-	HCP_LOGIN  string = ""
-	HCP_QUERY  string = ""
-	HCP_SUBMIT string = ""
-	UA         string = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.89 Safari/537.36"
-)
-
-func sendGet(url string, start int64, end int64) (content string, err error) {
-	req, err := http.NewRequest("GET", url, nil)
+func sendGet(url string, start int64, end int64, file *os.File) (len int64, err error) {
+	var req *http.Request
+	req, err = http.NewRequest("GET", url, nil)
+	req.Header.Set("Range", "bytes="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: tr}
-	resp, _ := client.Do(req)
+	var resp *http.Response
+	resp, err = client.Do(req)
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	return string(body), err
+	len, err = io.Copy(file, resp.Body)
+	return len, err
 }
 
-func sendHead(url string) (l string) {
-	req, err := http.NewRequest("HEAD", url, nil)
+func sendHead(url string) (l string, err error) {
+	var req *http.Request
+	req, err = http.NewRequest("HEAD", url, nil)
 	if err != nil {
 		log.Debug("create HEAD failed")
 		return
@@ -37,7 +37,8 @@ func sendHead(url string) (l string) {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: tr}
-	resp, err := client.Do(req)
+	var resp *http.Response
+	resp, err = client.Do(req)
 	if err != nil {
 		log.Debug("HEAD response failed")
 		return
