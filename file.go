@@ -3,6 +3,8 @@ package gorc
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -51,15 +53,19 @@ func assign(url string) {
 	f := &File{url: url, name: fName, length: length, filePath: path.Join(root, "lib", fName)}
 	Context.file = f
 	l, _ := strconv.ParseInt(length, 10, 64)
+	var element *block
 	if manual {
-		partFileManual(l, thread, tName)
+		element = partFileManual(l, thread, tName)
+		assignBlock(element)
 		return
 	}
 	if l/(LEVEL*LEVEL*32) == 0 {
-		partFileManual(l, thread, tName)
+		element = partFileManual(l, thread, tName)
+		assignBlock(element)
 		return
 	}
-	partFile(l, 0, l-1)
+	element = partFile(l, 0, l-1)
+	assignBlock(element)
 }
 func searchName(url string) (tmpName, fullName string) {
 	u := []byte(url)
@@ -177,6 +183,18 @@ func createFile(file string) (f *os.File, err error) {
 	}
 	return file, err
 }
+func createFileOnly(file string) error {
+	if checkFileStat(file) {
+		log.Println(file, "文件存在")
+		return nil
+	}
+	f, err := os.Create(file)
+	if err != nil {
+		log.Println(file, "文件创建失败")
+	}
+	defer f.Close()
+	return err
+}
 func deleteFile(file string) error {
 	if !checkFileStat(file) {
 		log.Println(file, "文件不存在")
@@ -194,4 +212,28 @@ func checkFileStat(file string) bool {
 		exist = false
 	}
 	return exist
+}
+func appendToFile(fileName string, content string) error {
+	// 以只写的模式，打开文件
+	f, err := os.OpenFile(fileName, os.O_WRONLY, 0644)
+	if err != nil {
+		log.Println("file append failed. err: " + err.Error())
+	} else {
+		// 查找文件末尾的偏移量
+		n, _ := f.Seek(0, os.SEEK_END)
+		// 从末尾的偏移量开始写入内容
+		_, err = f.WriteAt([]byte(content), n)
+	}
+	defer f.Close()
+	return err
+}
+func readFile(path string) string {
+	fi, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+	defer fi.Close()
+	fd, err := ioutil.ReadAll(fi)
+	// fmt.Println(string(fd))
+	return string(fd)
 }

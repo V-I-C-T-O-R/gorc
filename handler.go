@@ -1,16 +1,26 @@
 package gorc
 
-import "sync"
+import (
+	"log"
+	"sync"
+)
 
 var group sync.WaitGroup
 
-func doGet(url string) {
-
-}
-func download() {
+func Download(url string) {
+	assign(url)
 	for key, meta := range Context.fileNames {
 		group.Add(1)
 		go goBT(Context.file.url, key, meta)
+	}
+	group.Wait()
+	err := createFileOnly(Context.file.filePath)
+	if err != nil {
+		log.Println(err.Error())
+		panic(err)
+	}
+	for _, value := range Context.tempList {
+		appendToFile(Context.file.filePath, readFile(value))
 	}
 }
 func goBT(url string, address string, b *block) {
