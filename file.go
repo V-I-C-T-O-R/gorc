@@ -1,7 +1,6 @@
 package gorc
 
 import (
-	"code.google.com/p/google-api-go-client/books/v1"
 	"crypto/md5"
 	"encoding/hex"
 	"log"
@@ -19,10 +18,10 @@ const (
 )
 
 type File struct {
-	url    string
-	name   string
-	length int64
-	file   string
+	url      string
+	name     string
+	length   int64
+	filePath string
 }
 type block struct {
 	previous *block
@@ -34,6 +33,7 @@ type context struct {
 	fileNames map[string]*block
 	lock      *sync.Mutex
 	file      *File
+	tempList  []string
 }
 
 var Context *context = new(context)
@@ -48,10 +48,14 @@ func assign(url string) {
 		log.Println("get file length failed")
 		return
 	}
-	f := &File{url: url, name: fName, length: length, file: path.Join(root, "lib", fName)}
+	f := &File{url: url, name: fName, length: length, filePath: path.Join(root, "lib", fName)}
 	Context.file = f
 	l, _ := strconv.ParseInt(length, 10, 64)
 	if manual {
+		partFileManual(l, thread, tName)
+		return
+	}
+	if l/(LEVEL*LEVEL*32) == 0 {
 		partFileManual(l, thread, tName)
 		return
 	}
@@ -77,23 +81,28 @@ func searchName(url string) (tmpName, fullName string) {
 	return
 }
 
-func countBlock() {
-
-}
-
-func assignBlock(name string, b *block) {
+func assignBlock(b *block) {
 	if b == nil {
 		return
 	}
 	m := make(map[string]*block)
+	listId := []string{}
 	p := path.Join(root, "lib", b.id)
 	m[p] = b
+	listId = append(listId, b.id)
 	if b.previous != nil {
 		b = b.previous
 		p = path.Join(root, "lib", b.id)
 		m[p] = b
+		listId = append(listId, p)
 	}
 	Context.fileNames = m
+	listNames := []string{}
+	for i := len(listId) - 1; i >= 0; i++ {
+		addr, _ := Context.fileNames[listId[i]]
+		listNames = append(listNames, addr)
+	}
+	Context.tempList = listNames
 }
 func partFile(length int64, start int64, end int64) *block {
 	if length/(LEVEL*LEVEL*32) > 0 && length/(LEVEL*LEVEL*LEVEL) == 0 {
@@ -116,11 +125,9 @@ func partFileManual(length int64, thread int64, name string) (b *block) {
 	b = new(block)
 	var start int64
 	var i int64
-	m := make(map[string]*block)
 	for i = 1; i <= thread; i++ {
 		var seg = new(block)
 		r := MD5(name + strconv.FormatInt(i, 10))
-		p := path.Join(root, "lib", MD5(name+strconv.FormatInt(i, 10)))
 		seg.id = r
 		seg.previous = b
 		seg.start = start
@@ -131,9 +138,7 @@ func partFileManual(length int64, thread int64, name string) (b *block) {
 		}
 		start = blockSize * i
 		b = seg
-		m[p] = seg
 	}
-	Context.fileNames = m
 	return b
 }
 
@@ -160,34 +165,33 @@ func GetRandomString(length int) string {
 	}
 	return string(result)
 }
-func createFile(file string) error {
+func createFile(file string) (f *os.File, err error) {
 	if checkFileStat(file) {
 		log.Println(file, "文件存在")
-		return nil
+		f, err = os.OpenFile(file, os.O_RDWR, 0666)
+		return f, err
 	}
-	file, err:= os.Create(file)
-	if err!=nil {
+	f, err = os.Create(file)
+	if err != nil {
 		log.Println(file, "文件创建失败")
 	}
-	defer file.Close()
-	return err
+	return file, err
 }
-func deleteFile(file string) error{
+func deleteFile(file string) error {
 	if !checkFileStat(file) {
 		log.Println(file, "文件不存在")
 		return nil
 	}
-	err:=os.Remove(file)
-	if err!=nil {
+	err := os.Remove(file)
+	if err != nil {
 		log.Println(file, "文件删除失败")
 	}
 	return err
 }
 func checkFileStat(file string) bool {
-	var exist = true;
+	var exist = true
 	if _, err := os.Stat(file); os.IsNotExist(err) {
-		exist = false;
+		exist = false
 	}
-	return exist;
-}
+	return exist
 }

@@ -5,11 +5,10 @@ import (
 	"github.com/coreos/go-log/log"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 )
 
-func sendGet(url string, start int64, end int64, file *os.File) (len int64, err error) {
+func sendGet(url string, address string, start int64, end int64) (len int64, err error) {
 	var req *http.Request
 	req, err = http.NewRequest("GET", url, nil)
 	req.Header.Set("Range", "bytes="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
@@ -20,6 +19,7 @@ func sendGet(url string, start int64, end int64, file *os.File) (len int64, err 
 	var resp *http.Response
 	resp, err = client.Do(req)
 	defer resp.Body.Close()
+	file, err := createFile(address)
 	len, err = io.Copy(file, resp.Body)
 	return len, err
 }
