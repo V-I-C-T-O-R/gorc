@@ -1,8 +1,17 @@
 package gorc
 
 import (
+	"code.google.com/p/google-api-go-client/books/v1"
+	"crypto/md5"
+	"encoding/hex"
+	"log"
+	"math/rand"
 	"os"
+	"path"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -10,35 +19,175 @@ const (
 )
 
 type File struct {
+	url    string
 	name   string
 	length int64
-	index  int64
-	file   *os.File
+	file   string
 }
 type block struct {
 	previous *block
+	id       string
 	start    int64
 	end      int64
-	subList  *block
 }
 type context struct {
-	fileNames map[string]block
+	fileNames map[string]*block
 	lock      *sync.Mutex
-	files     []File
+	file      *File
 }
 
+var Context *context = new(context)
+
 func openfile(c *context) *os.File {
+	return nil
+}
+func assign(url string) {
+	tName, fName := searchName(url)
+	length, err := sendHead(url)
+	if err != nil {
+		log.Println("get file length failed")
+		return
+	}
+	f := &File{url: url, name: fName, length: length, file: path.Join(root, "lib", fName)}
+	Context.file = f
+	l, _ := strconv.ParseInt(length, 10, 64)
+	if manual {
+		partFileManual(l, thread, tName)
+		return
+	}
+	partFile(l, 0, l-1)
+}
+func searchName(url string) (tmpName, fullName string) {
+	u := []byte(url)
+	s := strings.LastIndex(url, "/")
+	if s == -1 {
+		s = 0
+		fullName = u[s:]
+	} else {
+		fullName = u[s+1:]
+	}
+	t := []byte(fullName)
+	d := strings.LastIndex(fullName, ".")
+	if d == -1 {
+		d = len(t)
+		tmpName = string(t[:])
+	} else {
+		tmpName = string(t[:d])
+	}
 	return
 }
-func partFile(length int64, start int64) *block {
-	if length/(LEVEL*LEVEL*10) > 0 && length/(LEVEL*LEVEL*LEVEL) == 0 {
-		return &block{start: length / 2, end: length, previous: partFile(length/2-1, start), subList: partFile(length-length/2+1, length/2)}
+
+func countBlock() {
+
+}
+
+func assignBlock(name string, b *block) {
+	if b == nil {
+		return
+	}
+	m := make(map[string]*block)
+	p := path.Join(root, "lib", b.id)
+	m[p] = b
+	if b.previous != nil {
+		b = b.previous
+		p = path.Join(root, "lib", b.id)
+		m[p] = b
+	}
+	Context.fileNames = m
+}
+func partFile(length int64, start int64, end int64) *block {
+	if length/(LEVEL*LEVEL*32) > 0 && length/(LEVEL*LEVEL*LEVEL) == 0 {
+		length = length - LEVEL*LEVEL*32 + 1
+		return &block{id: GetRandomSalt(), start: length - 1, end: end, previous: partFile(length, start, length-1)}
 	}
 	if length/(LEVEL*LEVEL*LEVEL) > 0 && length/(LEVEL*LEVEL*LEVEL*LEVEL) == 0 {
-		return &block{start: length / 2, end: length, previous: partFile(length/2-1, start), subList: partFile(length-length/2+1, length/2)}
+		length = length - LEVEL*LEVEL*32 + 1
+		return &block{id: GetRandomSalt(), start: length - 1, end: end, previous: partFile(length, start, length-1)}
 	}
 	if length/(LEVEL*LEVEL*LEVEL*LEVEL) > 0 {
-		return &block{start: length / 2, end: length, previous: partFile(length/2-1, start), subList: partFile(length-length/2+1, length/2)}
+		length = length - LEVEL*LEVEL*32 + 1
+		return &block{id: GetRandomSalt(), start: length - 1, end: end, previous: partFile(length, start, length-1)}
 	}
-	return &block{start: start, end: length}
+	return &block{id: GetRandomSalt(), start: start, end: end}
+}
+
+func partFileManual(length int64, thread int64, name string) (b *block) {
+	blockSize := length / thread
+	b = new(block)
+	var start int64
+	var i int64
+	m := make(map[string]*block)
+	for i = 1; i <= thread; i++ {
+		var seg = new(block)
+		r := MD5(name + strconv.FormatInt(i, 10))
+		p := path.Join(root, "lib", MD5(name+strconv.FormatInt(i, 10)))
+		seg.id = r
+		seg.previous = b
+		seg.start = start
+		if blockSize*i < length {
+			seg.end = blockSize * i
+		} else {
+			seg.end = blockSize*i - 1
+		}
+		start = blockSize * i
+		b = seg
+		m[p] = seg
+	}
+	Context.fileNames = m
+	return b
+}
+
+// 生成32位MD5
+func MD5(text string) string {
+	ctx := md5.New()
+	ctx.Write([]byte(text))
+	return hex.EncodeToString(ctx.Sum(nil))
+}
+
+// return len=8  salt
+func GetRandomSalt() string {
+	return GetRandomString(8)
+}
+
+//生成随机字符串
+func GetRandomString(length int) string {
+	str := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	bytes := []byte(str)
+	result := []byte{}
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	for i := 0; i < length; i++ {
+		result = append(result, bytes[r.Intn(len(bytes))])
+	}
+	return string(result)
+}
+func createFile(file string) error {
+	if checkFileStat(file) {
+		log.Println(file, "文件存在")
+		return nil
+	}
+	file, err:= os.Create(file)
+	if err!=nil {
+		log.Println(file, "文件创建失败")
+	}
+	defer file.Close()
+	return err
+}
+func deleteFile(file string) error{
+	if !checkFileStat(file) {
+		log.Println(file, "文件不存在")
+		return nil
+	}
+	err:=os.Remove(file)
+	if err!=nil {
+		log.Println(file, "文件删除失败")
+	}
+	return err
+}
+func checkFileStat(file string) bool {
+	var exist = true;
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		exist = false;
+	}
+	return exist;
+}
 }

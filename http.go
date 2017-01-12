@@ -3,9 +3,7 @@ package gorc
 import (
 	"crypto/tls"
 	"github.com/coreos/go-log/log"
-	"github.com/hu17889/go_spider/core/common/request"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
