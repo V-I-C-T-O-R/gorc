@@ -3,7 +3,6 @@ package gorc
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -22,7 +21,7 @@ const (
 type File struct {
 	url      string
 	name     string
-	length   int64
+	length   string
 	filePath string
 }
 type block struct {
@@ -30,19 +29,19 @@ type block struct {
 	id       string
 	start    int64
 	end      int64
+	count    int
+	lock     sync.Mutex
 }
 type context struct {
 	fileNames map[string]*block
-	lock      *sync.Mutex
 	file      *File
 	tempList  []string
 }
 
 var Context *context = new(context)
+var Count int
+var s sync.Mutex
 
-func openfile(c *context) *os.File {
-	return nil
-}
 func assign(url string) {
 	tName, fName := searchName(url)
 	length, err := sendHead(url)
@@ -59,7 +58,7 @@ func assign(url string) {
 		assignBlock(element)
 		return
 	}
-	if l/(LEVEL*LEVEL*32) == 0 {
+	if l/(LEVEL*LEVEL*16) == 0 {
 		element = partFileManual(l, thread, tName)
 		assignBlock(element)
 		return
@@ -72,9 +71,9 @@ func searchName(url string) (tmpName, fullName string) {
 	s := strings.LastIndex(url, "/")
 	if s == -1 {
 		s = 0
-		fullName = u[s:]
+		fullName = string(u[s:])
 	} else {
-		fullName = u[s+1:]
+		fullName = string(u[s+1:])
 	}
 	t := []byte(fullName)
 	d := strings.LastIndex(fullName, ".")
@@ -95,35 +94,30 @@ func assignBlock(b *block) {
 	listId := []string{}
 	p := path.Join(root, "lib", b.id)
 	m[p] = b
-	listId = append(listId, b.id)
-	if b.previous != nil {
+	listId = append(listId, p)
+	for b.previous != nil {
 		b = b.previous
 		p = path.Join(root, "lib", b.id)
 		m[p] = b
 		listId = append(listId, p)
 	}
 	Context.fileNames = m
-	listNames := []string{}
-	for i := len(listId) - 1; i >= 0; i++ {
-		addr, _ := Context.fileNames[listId[i]]
-		listNames = append(listNames, addr)
-	}
-	Context.tempList = listNames
+	Context.tempList = listId
 }
 func partFile(length int64, start int64, end int64) *block {
-	if length/(LEVEL*LEVEL*32) > 0 && length/(LEVEL*LEVEL*LEVEL) == 0 {
-		length = length - LEVEL*LEVEL*32 + 1
-		return &block{id: GetRandomSalt(), start: length - 1, end: end, previous: partFile(length, start, length-1)}
+	if length/(LEVEL*LEVEL*16) > 0 && length/(LEVEL*LEVEL*LEVEL) == 0 {
+		length = length - LEVEL*LEVEL*16
+		return &block{id: MD5(""), start: length + 1, end: end, previous: partFile(length, start, length-1)}
 	}
 	if length/(LEVEL*LEVEL*LEVEL) > 0 && length/(LEVEL*LEVEL*LEVEL*LEVEL) == 0 {
-		length = length - LEVEL*LEVEL*32 + 1
-		return &block{id: GetRandomSalt(), start: length - 1, end: end, previous: partFile(length, start, length-1)}
+		length = length - LEVEL*LEVEL*16
+		return &block{id: MD5(""), start: length + 1, end: end, previous: partFile(length, start, length-1)}
 	}
 	if length/(LEVEL*LEVEL*LEVEL*LEVEL) > 0 {
-		length = length - LEVEL*LEVEL*32 + 1
-		return &block{id: GetRandomSalt(), start: length - 1, end: end, previous: partFile(length, start, length-1)}
+		length = length - LEVEL*LEVEL*16
+		return &block{id: MD5(""), start: length + 1, end: end, previous: partFile(length, start, length-1)}
 	}
-	return &block{id: GetRandomSalt(), start: start, end: end}
+	return &block{id: MD5(""), start: start, end: end}
 }
 
 func partFileManual(length int64, thread int64, name string) (b *block) {
@@ -151,42 +145,32 @@ func partFileManual(length int64, thread int64, name string) (b *block) {
 // 生成32位MD5
 func MD5(text string) string {
 	ctx := md5.New()
+	if text == "" {
+		ctx.Write([]byte(GetEndName()))
+		return hex.EncodeToString(ctx.Sum(nil))
+	}
 	ctx.Write([]byte(text))
 	return hex.EncodeToString(ctx.Sum(nil))
 }
-
-// return len=8  salt
-func GetRandomSalt() string {
-	return GetRandomString(8)
-}
-
-//生成随机字符串
-func GetRandomString(length int) string {
-	str := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	bytes := []byte(str)
-	result := []byte{}
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	for i := 0; i < length; i++ {
-		result = append(result, bytes[r.Intn(len(bytes))])
-	}
-	return string(result)
+func GetEndName() int {
+	Count++
+	return strconv.Itoa(Count)
 }
 func createFile(file string) (f *os.File, err error) {
 	if checkFileStat(file) {
-		log.Println(file, "文件存在")
-		f, err = os.OpenFile(file, os.O_RDWR, 0666)
-		return f, err
+		log.Println("创建", file, "失败", "文件存在")
+		deleteFile(file)
 	}
 	f, err = os.Create(file)
 	if err != nil {
 		log.Println(file, "文件创建失败")
 	}
-	return file, err
+	return f, err
 }
 func createFileOnly(file string) error {
 	if checkFileStat(file) {
-		log.Println(file, "文件存在")
-		return nil
+		log.Println("创建", file, "文件存在")
+		deleteFile(file)
 	}
 	f, err := os.Create(file)
 	if err != nil {
@@ -197,7 +181,7 @@ func createFileOnly(file string) error {
 }
 func deleteFile(file string) error {
 	if !checkFileStat(file) {
-		log.Println(file, "文件不存在")
+		log.Println("删除", file, "失败", "文件不存在")
 		return nil
 	}
 	err := os.Remove(file)
