@@ -3,6 +3,8 @@ package main
 import "github.com/V-I-C-T-O-R/gorc"
 
 func main() {
-	var url = "http://golangtc.com/static/go/1.8beta1/go1.8beta1.darwin-amd64.pkg"
+	//var url = "https://github-windows.s3.amazonaws.com/GitHubSetup.exe"
+	var url = "http://down.360safe.com/se/360se8.1.1.246.exe"
+	//var url = "https://cdn.mysql.com//Downloads/MySQL-5.7/mysql-5.7.17-win32.zip"
 	gorc.Download(url)
 }

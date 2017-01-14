@@ -5,17 +5,19 @@ import (
 	"encoding/hex"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
 const (
-	LEVEL = 1024
+	LEVEL   int64 = 1024
+	RULE    int64 = LEVEL * LEVEL * 16
+	WINDOWS       = "windows"
+	LINUX         = "linux"
 )
 
 type File struct {
@@ -30,7 +32,6 @@ type block struct {
 	start    int64
 	end      int64
 	count    int
-	lock     sync.Mutex
 }
 type context struct {
 	fileNames map[string]*block
@@ -40,29 +41,38 @@ type context struct {
 
 var Context *context = new(context)
 var Count int
-var s sync.Mutex
 
 func assign(url string) {
+	log.Println("manual == ", manual)
 	tName, fName := searchName(url)
 	length, err := sendHead(url)
 	if err != nil {
 		log.Println("get file length failed")
 		return
 	}
-	f := &File{url: url, name: fName, length: length, filePath: path.Join(root, "lib", fName)}
+	if !checkFileStat(root) {
+		err := os.MkdirAll(root, 0666)
+		if err != nil {
+			panic(err)
+		}
+	}
+	f := &File{url: url, name: fName, length: length, filePath: filePath(fName)}
 	Context.file = f
 	l, _ := strconv.ParseInt(length, 10, 64)
 	var element *block
 	if manual {
+		log.Println("manual pattern")
 		element = partFileManual(l, thread, tName)
 		assignBlock(element)
 		return
 	}
-	if l/(LEVEL*LEVEL*16) == 0 {
+	if l <= (RULE * blockSize) {
+		log.Println("default manual pattern")
 		element = partFileManual(l, thread, tName)
 		assignBlock(element)
 		return
 	}
+	log.Println("auto pattern")
 	element = partFile(l, 0, l-1)
 	assignBlock(element)
 }
@@ -92,12 +102,12 @@ func assignBlock(b *block) {
 	}
 	m := make(map[string]*block)
 	listId := []string{}
-	p := path.Join(root, "lib", b.id)
+	p := filePath(b.id)
 	m[p] = b
 	listId = append(listId, p)
 	for b.previous != nil {
 		b = b.previous
-		p = path.Join(root, "lib", b.id)
+		p = filePath(b.id)
 		m[p] = b
 		listId = append(listId, p)
 	}
@@ -105,39 +115,53 @@ func assignBlock(b *block) {
 	Context.tempList = listId
 }
 func partFile(length int64, start int64, end int64) *block {
-	if length/(LEVEL*LEVEL*16) > 0 && length/(LEVEL*LEVEL*LEVEL) == 0 {
-		length = length - LEVEL*LEVEL*16
-		return &block{id: MD5(""), start: length + 1, end: end, previous: partFile(length, start, length-1)}
+	if length/(RULE*blockSize) > 0 && length/(LEVEL*LEVEL*LEVEL) == 0 {
+		length = length - RULE*blockSize
+		return &block{id: MD5(""), start: length, end: end, previous: partFile(length, start, length-1)}
 	}
 	if length/(LEVEL*LEVEL*LEVEL) > 0 && length/(LEVEL*LEVEL*LEVEL*LEVEL) == 0 {
-		length = length - LEVEL*LEVEL*16
-		return &block{id: MD5(""), start: length + 1, end: end, previous: partFile(length, start, length-1)}
+		length = length - RULE*blockSize
+		return &block{id: MD5(""), start: length, end: end, previous: partFile(length, start, length-1)}
 	}
 	if length/(LEVEL*LEVEL*LEVEL*LEVEL) > 0 {
-		length = length - LEVEL*LEVEL*16
-		return &block{id: MD5(""), start: length + 1, end: end, previous: partFile(length, start, length-1)}
+		length = length - RULE*blockSize
+		return &block{id: MD5(""), start: length, end: end, previous: partFile(length, start, length-1)}
 	}
 	return &block{id: MD5(""), start: start, end: end}
 }
 
 func partFileManual(length int64, thread int64, name string) (b *block) {
 	blockSize := length / thread
-	b = new(block)
+	surplus := length % thread
+	b = nil
 	var start int64
 	var i int64
-	for i = 1; i <= thread; i++ {
-		var seg = new(block)
-		r := MD5(name + strconv.FormatInt(i, 10))
-		seg.id = r
-		seg.previous = b
-		seg.start = start
-		if blockSize*i < length {
-			seg.end = blockSize * i
-		} else {
+	if surplus == 0 {
+		for i = 1; i <= thread; i++ {
+			seg := new(block)
+			r := name + MD5(strconv.FormatInt(i, 10))
+			seg.id = r
+			seg.previous = b
+			seg.start = start
 			seg.end = blockSize*i - 1
+			start = blockSize * i
+			b = seg
 		}
-		start = blockSize * i
-		b = seg
+	} else {
+		for i = 1; i <= thread+1; i++ {
+			seg := new(block)
+			r := name + MD5(strconv.FormatInt(i, 10))
+			seg.id = r
+			seg.previous = b
+			seg.start = start
+			if blockSize*i <= length {
+				seg.end = blockSize*i - 1
+				start = blockSize * i
+			} else {
+				seg.end = blockSize*i + surplus - 1
+			}
+			b = seg
+		}
 	}
 	return b
 }
@@ -152,13 +176,12 @@ func MD5(text string) string {
 	ctx.Write([]byte(text))
 	return hex.EncodeToString(ctx.Sum(nil))
 }
-func GetEndName() int {
+func GetEndName() string {
 	Count++
 	return strconv.Itoa(Count)
 }
 func createFile(file string) (f *os.File, err error) {
 	if checkFileStat(file) {
-		log.Println("创建", file, "失败", "文件存在")
 		deleteFile(file)
 	}
 	f, err = os.Create(file)
@@ -169,7 +192,6 @@ func createFile(file string) (f *os.File, err error) {
 }
 func createFileOnly(file string) error {
 	if checkFileStat(file) {
-		log.Println("创建", file, "文件存在")
 		deleteFile(file)
 	}
 	f, err := os.Create(file)
@@ -179,9 +201,9 @@ func createFileOnly(file string) error {
 	defer f.Close()
 	return err
 }
+
 func deleteFile(file string) error {
 	if !checkFileStat(file) {
-		log.Println("删除", file, "失败", "文件不存在")
 		return nil
 	}
 	err := os.Remove(file)
@@ -197,6 +219,18 @@ func checkFileStat(file string) bool {
 	}
 	return exist
 }
+func checkBlockStat(filePath string, b *block) bool {
+	m := checkFileStat(filePath)
+	if m {
+		if int64(len(readFile(filePath))) == (b.end - b.start + 1) {
+			return true
+		} else {
+			deleteFile(filePath)
+			return false
+		}
+	}
+	return false
+}
 func appendToFile(fileName string, content string) error {
 	// 以只写的模式，打开文件
 	f, err := os.OpenFile(fileName, os.O_WRONLY, 0644)
@@ -211,13 +245,30 @@ func appendToFile(fileName string, content string) error {
 	defer f.Close()
 	return err
 }
-func readFile(path string) string {
+func readFile(path string) []byte {
 	fi, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}
 	defer fi.Close()
-	fd, err := ioutil.ReadAll(fi)
-	// fmt.Println(string(fd))
-	return string(fd)
+	fd, _ := ioutil.ReadAll(fi)
+	return fd
+}
+func filePath(id string) string {
+	t := runtime.GOOS
+	var file string
+	if t == WINDOWS {
+		file = filepath.Join(root, id)
+	}
+	if t == LINUX {
+		file = path.Join(root, id)
+	}
+	return file
+}
+func getFileSize(file string) int64 {
+	if !checkFileStat(file) {
+		return 0
+	}
+	fi, _ := os.Stat(file)
+	return fi.Size()
 }
