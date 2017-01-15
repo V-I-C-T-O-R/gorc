@@ -43,7 +43,6 @@ var Context *context = new(context)
 var Count int
 
 func assign(url string) {
-	log.Println("manual == ", manual)
 	tName, fName := searchName(url)
 	length, err := sendHead(url)
 	if err != nil {
@@ -154,12 +153,12 @@ func partFileManual(length int64, thread int64, name string) (b *block) {
 			seg.id = r
 			seg.previous = b
 			seg.start = start
-			if blockSize*i <= length {
-				seg.end = blockSize*i - 1
-				start = blockSize * i
+			if i == (thread + 1) {
+				seg.end = blockSize*(i-1) + surplus - 1
 			} else {
-				seg.end = blockSize*i + surplus - 1
+				seg.end = blockSize*i - 1
 			}
+			start = blockSize * i
 			b = seg
 		}
 	}

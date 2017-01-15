@@ -1,6 +1,7 @@
 package gorc
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"strconv"
@@ -14,6 +15,7 @@ var exit chan bool = make(chan bool, 1)
 var exitSub chan bool = make(chan bool, 1)
 
 func Download(url string) (err error) {
+	flag.Parse()
 	assign(url)
 	go removeCache()
 	log.Println("start download")
@@ -22,7 +24,7 @@ func Download(url string) (err error) {
 		if checkBlockStat(key, meta) {
 			continue
 		}
-		log.Println("file", key, "start")
+		log.Println("file", key, "start", meta.end-meta.start+1)
 		group.Add(1)
 		go goBT(Context.file.url, key, meta)
 	}
