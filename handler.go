@@ -3,6 +3,7 @@ package gorc
 import (
 	"flag"
 	"fmt"
+	"github.com/juju/errors"
 	"log"
 	"strconv"
 	"sync"
@@ -16,7 +17,10 @@ var exitSub chan bool = make(chan bool, 1)
 
 func Download(url string) (err error) {
 	flag.Parse()
-	assign(url)
+	fl := assign(url)
+	if !fl {
+		return errors.New("")
+	}
 	go removeCache()
 	log.Println("start download")
 	previous := time.Now()
@@ -29,8 +33,7 @@ func Download(url string) (err error) {
 		go goBT(Context.file.url, key, meta)
 	}
 	time.Sleep(2 * time.Second)
-	gen, _ := strconv.ParseInt(Context.file.length, 10, 64)
-	goBar(gen, previous)
+	goBar(Context.file.length, previous)
 	group.Wait()
 	//log.Println("start unzip")
 	err = createFileOnly(Context.file.filePath)
@@ -64,6 +67,7 @@ func Download(url string) (err error) {
 func goBT(url string, address string, b *block) {
 	l, err := sendGet(url, address, b.start, b.end)
 	if err != nil || l != (b.end-b.start+1) {
+		log.Println("下载重试中")
 		if b.count > attempt {
 			pi <- b.id
 			err = nil
@@ -110,7 +114,7 @@ func goBar(length int64, t time.Time) {
 		}
 		percent := getPercent(sum, length)
 		result, _ := strconv.Atoi(percent)
-		str := "working " + percent + "% " + "[" + bar(result, 100) + "] " + " " + fmt.Sprintf("%.f", getCurrentSize(t)) + "s"
+		str := "working " + percent + "%" + "[" + bar(result, 100) + "] " + " " + fmt.Sprintf("%.f", getCurrentSize(t)) + "s"
 		fmt.Printf("\r%s", str)
 		time.Sleep(1 * time.Second)
 		if sum == length {

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 type File struct {
 	url      string
 	name     string
-	length   string
+	length   int64
 	filePath string
 }
 type block struct {
@@ -42,39 +43,62 @@ type context struct {
 var Context *context = new(context)
 var Count int
 
-func assign(url string) {
+func assign(url string) bool {
 	tName, fName := searchName(url)
-	length, err := sendHead(url)
+	length, agree, err := sendHead(url)
 	if err != nil {
 		log.Println("get file length failed")
-		return
+		return false
 	}
+	l, _ := strconv.ParseInt(length, 10, 64)
 	if !checkFileStat(root) {
 		err := os.MkdirAll(root, 0666)
 		if err != nil {
 			panic(err)
 		}
 	}
-	f := &File{url: url, name: fName, length: length, filePath: filePath(fName)}
+	if !agree {
+		log.Println("请求地址不支持断点续传,单线程下载中")
+		addr := filePath(fName)
+		singleThread(url, addr, l)
+		ps := time.Now()
+		goBar(l, ps)
+		group.Wait()
+		return false
+	}
+	f := &File{url: url, name: fName, length: l, filePath: filePath(fName)}
 	Context.file = f
-	l, _ := strconv.ParseInt(length, 10, 64)
 	var element *block
 	if manual {
 		log.Println("manual pattern")
 		element = partFileManual(l, thread, tName)
 		assignBlock(element)
-		return
+		return true
 	}
 	if l <= (RULE * blockSize) {
 		log.Println("default manual pattern")
 		element = partFileManual(l, thread, tName)
 		assignBlock(element)
-		return
+		return true
 	}
 	log.Println("auto pattern")
 	element = partFile(l, 0, l-1)
 	assignBlock(element)
+	return true
 }
+
+func singleThread(url string, address string, length int64) {
+	k := new(block)
+	k.start = 0
+	k.end = length - 1
+	k.id = address
+	m := make(map[string]*block)
+	m[address] = k
+	Context.fileNames = m
+	group.Add(1)
+	go goBT(url, address, k)
+}
+
 func searchName(url string) (tmpName, fullName string) {
 	u := []byte(url)
 	s := strings.LastIndex(url, "/")
