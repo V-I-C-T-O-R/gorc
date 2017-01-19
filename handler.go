@@ -1,9 +1,9 @@
 package gorc
 
 import (
+	"errors"
 	"flag"
 	"fmt"
-	"github.com/juju/errors"
 	"log"
 	"strconv"
 	"sync"
