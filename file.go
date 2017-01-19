@@ -58,8 +58,10 @@ func assign(url string) bool {
 		}
 	}
 	if !agree {
+		log.Println("资源不支持断点续传模式，单线程模式执行中")
 		addr := filePath(fName)
 		singleThread(url, addr, l)
+		time.Sleep(2 * time.Second)
 		ps := time.Now()
 		goBar(l, ps)
 		group.Wait()
