@@ -58,12 +58,12 @@ func assign(url string) bool {
 		}
 	}
 	if !agree {
-		log.Println("请求地址不支持断点续传,单线程下载中")
 		addr := filePath(fName)
 		singleThread(url, addr, l)
 		ps := time.Now()
 		goBar(l, ps)
 		group.Wait()
+		log.Println("download completed")
 		return false
 	}
 	f := &File{url: url, name: fName, length: l, filePath: filePath(fName)}
