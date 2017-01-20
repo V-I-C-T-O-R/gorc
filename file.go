@@ -58,10 +58,11 @@ func assign(url string) bool {
 		}
 	}
 	if !agree {
-		log.Println("资源不支持断点续传模式，单线程模式执行中")
+		log.Println("资源不支持断点续传模式,单线程模式执行中")
 		addr := filePath(fName)
-		singleThread(url, addr, l)
-		time.Sleep(2 * time.Second)
+		group.Add(1)
+		go singleThread(url, addr, l)
+		time.Sleep(3 * time.Second)
 		ps := time.Now()
 		goBar(l, ps)
 		group.Wait()
@@ -97,8 +98,7 @@ func singleThread(url string, address string, length int64) {
 	m := make(map[string]*block)
 	m[address] = k
 	Context.fileNames = m
-	group.Add(1)
-	go goBT(url, address, k)
+	goBT(url, address, k)
 }
 
 func searchName(url string) (tmpName, fullName string) {

@@ -118,7 +118,7 @@ func goBar(length int64, t time.Time) {
 		fmt.Printf("\r%s", str)
 		time.Sleep(1 * time.Second)
 		if sum == length {
-			fmt.Printf("\n")
+			fmt.Println("")
 			break
 		}
 	}
